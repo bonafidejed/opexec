@@ -29,4 +29,8 @@ go.work.sum
 
 # Editor/IDE
 # .idea/
-# .vscode/
+.vscode/
+payloads/*
+!payloads/example_request_payload.json
+!payloads/example_response_payload.json
+/opexec
