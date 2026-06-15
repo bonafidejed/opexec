@@ -12,6 +12,7 @@ What I did on my installation (debian-based headless):
 * clone the repo to a folder in my home directory
 * go into the opexec folder
 * run this command `go build -o ~/.local/bin/opexec`
+* fix the permissions so OpenClaw is happy `chmod 755 ~/.local/bin/opexec`
 
 ## Running with OpenClaw
 
