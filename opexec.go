@@ -32,7 +32,7 @@ type Response struct {
 // }
 
 func main() {
-	logFileName := "logFile.log"
+	logFileName := "opexec.log"
 
 	// open log file
 	logFile, logFileErr := os.OpenFile(logFileName, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
