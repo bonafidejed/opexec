@@ -1,0 +1,11 @@
+2026/06/14 21:15:08 Log setup, starting to read standard input
+2026/06/14 21:15:08 Standard input was: { "protocolVersion": 1, "provider": "opexec", "ids": ["op://Kai/Twilio/credential"] }
+2026/06/14 21:15:57 Log setup, starting to read standard input
+2026/06/14 21:15:57 Standard input was: { "protocolVersion": 1, "provider": "opexec", "ids": ["op://Kai/Twilio/credential"] }
+2026/06/14 21:19:17 Log setup, starting to read standard input
+2026/06/14 21:19:17 Standard input was: { "protocolVersion": 1, "provider": "opexec", "ids": ["op://Kai/Twilio/credential"] }
+2026/06/14 21:19:17 Found out the Reference is : op://Kai/Twilio/credential
+2026/06/14 21:19:17 Got the envrironment variable.
+2026/06/14 21:19:22 Connected to 1Password.
+2026/06/14 21:19:22 Got the secret value.
+2026/06/14 21:19:22 Outputting the response.
