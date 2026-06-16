@@ -161,13 +161,6 @@ func main() {
 
 	log.Println("Log setup, starting to read standard input")
 
-	// var req Request
-	// err = json.NewDecoder(os.Stdin).Decode(&req)
-	// if err != nil {
-	// 	log.Fatalf("Unable to decode stdin as JSON: %v", err)
-	// }
-	// refs := req.IDs
-
 	rawInput, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		log.Fatalf("Failed to read standard input: %v", err)
