@@ -1,17 +1,18 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/1Password/connect-sdk-go/connect"
+	connectop "github.com/1Password/connect-sdk-go/onepassword" // <-- Add this alias
 	"github.com/1password/onepassword-sdk-go"
 )
 
@@ -26,157 +27,175 @@ type Response struct {
 	Values          map[string]string `json:"values"`
 }
 
-func GetSecretFromOP(ref string) (string, error) {
+func GetSecretFromOP(ctx context.Context, refs []string) (map[string]string, error) {
+	vals := make(map[string]string)
 	client, err := onepassword.NewClient(
-		context.TODO(),
+		ctx,
 		onepassword.WithServiceAccountToken(os.Getenv("OP_SERVICE_ACCOUNT_TOKEN")),
 		onepassword.WithIntegrationInfo("opexec for OpenClaw", "v1.0.0"),
 	)
 	if err != nil {
-		return "", fmt.Errorf("1Password unable to connect due to: %w", err)
+		return vals, fmt.Errorf("1Password unable to connect due to: %w", err)
 	}
 
 	log.Println("1Password connected.")
 
-	val, err := client.Secrets().Resolve(context.TODO(), ref)
-	if err != nil {
-		return "", fmt.Errorf("1Password unable to retrieve the secret due to: %w", err)
+	for _, ref := range refs {
+		val, err := client.Secrets().Resolve(context.TODO(), ref)
+		if err != nil {
+			return vals, fmt.Errorf("1Password unable to retrieve the secret for %s due to: %w", ref, err)
+		}
+		vals[ref] = val
 	}
 
-	return val, nil
+	return vals, nil
 }
 
-func GetSecretFromConnect(ref string) (string, error) {
-	var refVault string
-	var refItem string
-	var refSection any
-	var refField string
-
-	if strings.HasPrefix(ref, "op://") {
-		refSplit := strings.Split(strings.TrimLeft(ref, "op://"), "/")
-		switch len(refSplit) {
-		case 3:
-			refVault = refSplit[0]
-			refItem = refSplit[1]
-			refSection = nil
-			refField = refSplit[2]
-		case 4:
-			refVault = refSplit[0]
-			refItem = refSplit[1]
-			refSection = refSplit[2]
-			refField = refSplit[3]
-		default:
-			return "", errors.New("OP Connect cannot continue, that is not a valid 1Password referecne string")
-		}
-	} else {
-		return "", errors.New("OP Connect cannot continue, that is not a valid 1Password referecne string")
-	}
+func GetSecretFromConnect(refs []string) (map[string]string, error) {
+	vals := make(map[string]string)
 
 	conn, err := connect.NewClientFromEnvironment()
 	if err != nil {
-		return "", fmt.Errorf("OP Connect could not connect to the server because of: %w", err)
-	}
-	item, err := conn.GetItem(refItem, refVault)
-	if err != nil {
-		return "", fmt.Errorf("OP Connect could not retrieve the item because of: %w", err)
+		return vals, fmt.Errorf("OP Connect could not connect to the server because of: %w", err)
 	}
 
 	log.Println("OP Connect connected.")
 
-	var idxs []int
-	for i, field := range item.Fields {
-		if (field.Label == refField) && ((field.Section == refSection) || refSection == nil) {
-			idxs = append(idxs, i)
+	itemCache := make(map[string]*connectop.Item)
+
+	for _, ref := range refs {
+		var refVault string
+		var refItem string
+		var refSection string
+		var refField string
+
+		if strings.HasPrefix(ref, "op://") {
+			refSplit := strings.Split(strings.TrimLeft(ref, "op://"), "/")
+			switch len(refSplit) {
+			case 3:
+				refVault = refSplit[0]
+				refItem = refSplit[1]
+				refSection = ""
+				refField = refSplit[2]
+			case 4:
+				refVault = refSplit[0]
+				refItem = refSplit[1]
+				refSection = refSplit[2]
+				refField = refSplit[3]
+			default:
+				return vals, fmt.Errorf("OP Connect cannot continue, %s is not a valid 1Password reference string.", ref)
+			}
 		} else {
-			//fmt.Printf("It's not %s\n", field.ID)
+			return vals, fmt.Errorf("OP Connect cannot continue, %s is not a valid 1Password reference string.", ref)
 		}
+
+		cacheKey := refVault + "/" + refItem
+
+		item, exists := itemCache[cacheKey]
+		if !exists {
+			var apiErr error
+			// If it doesn't exist, fetch it from the Connect server
+			item, apiErr = conn.GetItem(refItem, refVault)
+			if apiErr != nil {
+				return vals, fmt.Errorf("OP Connect could not retrieve the item for %s because of: %w", ref, apiErr)
+			}
+			// Store the retrieved item in the cache for subsequent loops
+			itemCache[cacheKey] = item
+		}
+
+		var idxs []int
+		for i, field := range item.Fields {
+			if field.Label != refField && field.ID != refField {
+				continue
+			}
+			if refSection == "" {
+				if field.Section != nil {
+					if field.Section.ID != "add more" {
+						continue
+					}
+				}
+			} else {
+				if field.Section == nil {
+					continue
+				}
+				if field.Section.Label != refSection && field.Section.ID != refSection {
+					continue
+				}
+			}
+			idxs = append(idxs, i)
+		}
+
+		switch {
+		case len(idxs) == 0:
+			return vals, fmt.Errorf("OP Connect the [section/]field does not exist on %s.", ref)
+		case len(idxs) > 1:
+			return vals, fmt.Errorf("OP Connect more than one field matched %s.", ref)
+		}
+
+		idx := idxs[0]
+
+		vals[ref] = item.Fields[idx].Value
 	}
 
-	switch {
-	case len(idxs) == 0:
-		return "", errors.New("OP Connect that [section/]field does not exist on that item.")
-	case len(idxs) > 1:
-		return "", errors.New("OP Connect more than one field matched the secret reference.")
-	}
+	return vals, nil
 
-	idx := idxs[0]
-
-	return item.Fields[idx].Value, nil
 }
 
 func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var err error
+
 	log.SetOutput(os.Stderr)
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "-file":
-			lfName := "opexec.log"
-			lf, lfErr := os.OpenFile(lfName, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644)
-			if lfErr != nil {
-				log.Panic(lfErr)
-			}
-			defer lf.Close()
-			log.SetOutput(lf)
-		case "-screen":
-		default:
-			log.SetOutput(io.Discard)
+	logToFile := flag.Bool("file", false, "write logs to opexec.log in addition to stderr")
+	flag.Parse()
+	if *logToFile {
+		f, err := os.OpenFile("opexec.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+		if err != nil {
+			log.Fatalf("error opening log file: %v", err)
 		}
-	} else {
-		log.SetOutput(io.Discard)
+		defer f.Close()
+		multiWriter := io.MultiWriter(os.Stderr, f)
+		log.SetOutput(multiWriter)
 	}
 
 	log.Println("Log setup, starting to read standard input")
 
-	in := bufio.NewReader(os.Stdin)
-	inStr, _ := in.ReadString('\n')
-	inStr = strings.TrimSuffix(inStr, "\n")
-
-	log.Printf("Standard input was: %s\n", inStr)
-
 	var req Request
-	err := json.Unmarshal([]byte(inStr), &req)
+	err = json.NewDecoder(os.Stdin).Decode(&req)
 	if err != nil {
-		log.Printf("Unable to marshal stdin as JSON due to %s\n", err)
-		os.Exit(99)
+		log.Fatalf("Unable to decode stdin as JSON: %v", err)
 	}
+	refs := req.IDs
 
-	if len(req.IDs) < 1 {
-		log.Printf("Invalid input JSON, did not find any ids to process.")
-		os.Exit(99)
-	}
-	ref := req.IDs[0]
+	log.Printf("Found out the list of References is : %s\n", refs)
 
-	log.Printf("Found out the Reference is : %s\n", ref)
-
-	var val string
+	var vals map[string]string
 	if (os.Getenv("OP_CONNECT_HOST") != "") && (os.Getenv("OP_CONNECT_TOKEN") != "") {
-		val, err = GetSecretFromConnect(ref)
+		vals, err = GetSecretFromConnect(refs)
 		if (err != nil) && (os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") != "") {
-			fmt.Printf("Error retrieving secret: %s", err)
-			val, err = GetSecretFromOP(ref)
+			log.Printf("Error retrieving secret: %s", err)
+			vals, err = GetSecretFromOP(ctx, refs)
 		}
 	} else if os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") != "" {
-		val, err = GetSecretFromOP(ref)
+		vals, err = GetSecretFromOP(ctx, refs)
 	} else {
-		log.Println("Environment Variable(s) not found! To use Connect, set OP_CONNECT_HOST and OP_CONNECT_TOKEN. To use 1Password, set OP_SERVICE_ACCOUNT_TOKEN.")
-		os.Exit(99)
+		log.Fatalln("Environment Variable(s) not found! To use Connect, set OP_CONNECT_HOST and OP_CONNECT_TOKEN. To use 1Password, set OP_SERVICE_ACCOUNT_TOKEN.")
 	}
 	if err != nil {
-		log.Printf("Error retrieving secret: %s", err)
-		os.Exit(89)
+		log.Fatalf("Error retrieving secret: %s", err)
 	}
 
-	log.Printf("Got the secret value.")
+	log.Printf("Got the secret values.")
 
 	resp := Response{
 		ProtocolVersion: 1,
-		Values: map[string]string{
-			ref: val,
-		},
+		Values:          vals,
 	}
 
 	respData, err := json.Marshal(resp)
 	if err != nil {
-		log.Printf("Failed to generate JSON for output: %v", err)
+		log.Fatalf("Failed to generate JSON for output: %v", err)
 	}
 	log.Println("Outputting the response.")
 
