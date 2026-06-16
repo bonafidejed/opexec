@@ -70,7 +70,7 @@ func GetSecretFromConnect(refs []string) (map[string]string, error) {
 		var refField string
 
 		if strings.HasPrefix(ref, "op://") {
-			refSplit := strings.Split(strings.TrimLeft(ref, "op://"), "/")
+			refSplit := strings.Split(strings.TrimPrefix(ref, "op://"), "/")
 			switch len(refSplit) {
 			case 3:
 				refVault = refSplit[0]
@@ -161,10 +161,24 @@ func main() {
 
 	log.Println("Log setup, starting to read standard input")
 
-	var req Request
-	err = json.NewDecoder(os.Stdin).Decode(&req)
+	// var req Request
+	// err = json.NewDecoder(os.Stdin).Decode(&req)
+	// if err != nil {
+	// 	log.Fatalf("Unable to decode stdin as JSON: %v", err)
+	// }
+	// refs := req.IDs
+
+	rawInput, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		log.Fatalf("Unable to decode stdin as JSON: %v", err)
+		log.Fatalf("Failed to read standard input: %v", err)
+	}
+
+	log.Printf("Raw input received: %s\n", string(rawInput))
+
+	var req Request
+	err = json.Unmarshal(rawInput, &req)
+	if err != nil {
+		log.Fatalf("Unable to parse raw input as JSON: %v", err)
 	}
 	refs := req.IDs
 
